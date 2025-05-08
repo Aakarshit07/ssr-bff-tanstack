@@ -1,17 +1,40 @@
 // app/api/login/route.ts
-import { NextResponse } from 'next/server';
-import http from '@/lib/http.service';
 
-export async function POST(request: Request) {
+import { applySession } from '@/app/api/session';
+import { createEdgeRouter } from 'next-connect';
+import { RequestContext } from 'next/dist/server/base-server';
+import { NextRequest, NextResponse } from 'next/server';
+
+const edgeRouter = createEdgeRouter<NextRequest, RequestContext>();
+
+edgeRouter.use(applySession).post(async (req, res) => {
+  const { username, password } = await req.json();
+
   try {
-    const { username, password } = await request.json();
+    // Send request to external API for authentication
+    const response = await fetch('https://dummyjson.com/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+      headers: { 'Content-Type': 'application/json' },
+    });
 
-    const res = await http.post('/auth/login', { username, password });
+    if (!response.ok) {
+      return NextResponse.json({ message: 'Invalid credentials' }, { status: 401 });
+    }
 
-    return NextResponse.json(res.data);
-  } catch (error: any) {
-    const status = error.response?.status || 500;
-    const message = error.response?.data?.message || 'Internal Server Error';
-    return NextResponse.json({ error: message }, { status });
+    const { token } = await response.json();
+
+    // Store token in session
+    console.log("req: **", req);
+    req.session.token = token;
+    await new Promise((resolve) => req.session.save(resolve));
+
+    return NextResponse.json({ message: 'Login successful' });
+  } catch (error) {
+    return NextResponse.json({ message: 'Error during login' }, { status: 500 });
   }
+});
+
+export async function POST(request: NextRequest, ctx: RequestContext) {
+  return edgeRouter.run(request, ctx);
 }
